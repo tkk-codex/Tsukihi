@@ -22,6 +22,15 @@ document.getElementById('downloadUrl').onclick = () =>
     chrome.runtime.sendMessage({ type: "downloadUrl", tab: tabs[0] });
   });
 
+document.getElementById('downloadLocal1280').onclick = () =>
+  chrome.tabs.query({ active: true, currentWindow: true }, async function (tabs) {
+    try {
+      await downloadEhGalleryLocally(tabs[0]);
+    } catch (error) {
+      notifyLocalDownload(`Local download failed: ${error}`);
+    }
+  });
+
 document.getElementById('downloadLeft').onclick = () =>
   chrome.tabs.query({ currentWindow: true }, function (tabs) {
     chrome.runtime.sendMessage({ type: "batchDownload", tabs: getLeftSideTags(tabs) });
@@ -161,4 +170,110 @@ function safeHtmlInject(element, html) {
     element.appendChild(tag)
   }
 
+}
+
+async function downloadEhGalleryLocally(tab) {
+
+  if (!tab?.url || !isEhGalleryUrl(tab.url))
+    throw new Error("This button only works on E-Hentai/ExHentai gallery pages.");
+
+  const ids = extractGalleryIdentifiers(tab.url);
+  if (!ids)
+    throw new Error("Couldn't parse gallery gid/token from this URL.");
+
+  const archiverUrl = `${ids.origin}/archiver.php?gid=${ids.gid}&token=${ids.token}`;
+  notifyLocalDownload("Requesting EH resized archive...");
+
+  const html = await requestResampledArchive(archiverUrl);
+  const archiveUrl = extractArchiveDownloadUrl(html, ids.origin);
+
+  if (archiveUrl) {
+    await queueBrowserDownload(archiveUrl);
+    notifyLocalDownload("Queued resized archive download.");
+    return;
+  }
+
+  await openTab(archiverUrl);
+  notifyLocalDownload("Archive requested. Opened archiver page to finish download.");
+}
+
+function isEhGalleryUrl(url) {
+  return /^https:\/\/(e-hentai\.org|exhentai\.org)\/g\/[^/]+\/[^/]+\/?/.test(url);
+}
+
+function extractGalleryIdentifiers(url) {
+  const match = url.match(/^(https:\/\/(?:e-hentai\.org|exhentai\.org))\/g\/([^/]+)\/([^/]+)\/?/);
+  if (!match) return null;
+  return { origin: match[1], gid: match[2], token: match[3] };
+}
+
+async function requestResampledArchive(archiverUrl) {
+  const body = new URLSearchParams();
+  body.set("dltype", "res");
+  body.set("dlcheck", "Download Resample Archive");
+
+  const response = await fetch(archiverUrl, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString()
+  });
+
+  if (!response.ok)
+    throw new Error(`Archive request failed (${response.status}).`);
+
+  return await response.text();
+}
+
+function extractArchiveDownloadUrl(html, origin) {
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(html, "text/html");
+  const links = [...parsed.querySelectorAll("a[href]")];
+
+  const directLink = links
+    .map(l => l.getAttribute("href"))
+    .find(href => href && /archive|download|hath|file/.test(href));
+
+  if (!directLink) return null;
+
+  if (directLink.startsWith("http://") || directLink.startsWith("https://"))
+    return directLink;
+  if (directLink.startsWith("/"))
+    return `${origin}${directLink}`;
+  return `${origin}/${directLink}`;
+}
+
+async function queueBrowserDownload(url) {
+  await new Promise((resolve, reject) => {
+    chrome.downloads.download({
+      url: url,
+      saveAs: false,
+      conflictAction: "uniquify"
+    }, () => {
+      if (chrome.runtime.lastError)
+        reject(chrome.runtime.lastError.message);
+      else
+        resolve();
+    });
+  });
+}
+
+async function openTab(url) {
+  await new Promise((resolve, reject) => {
+    chrome.tabs.create({ url: url }, () => {
+      if (chrome.runtime.lastError)
+        reject(chrome.runtime.lastError.message);
+      else
+        resolve();
+    });
+  });
+}
+
+function notifyLocalDownload(message) {
+  chrome.notifications?.create(null, {
+    type: "basic",
+    title: "Tsukihi local download",
+    message: message,
+    iconUrl: "images/get_started128.png"
+  }, null);
 }
