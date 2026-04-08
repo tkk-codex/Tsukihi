@@ -9,6 +9,7 @@ Tiny WebBrowser helper for ![LANraragi](https://github.com/Difegue/LANraragi). ð
 * Asks your LRR server whether it has downloaded the URL you're currently looking at  
 * If not, provides quick shortcut buttons to queue the URL for downloading, or its left-side/right-side neighbors
 * Downloaded URLs can be automatically added to a Category on the Server for your read-later scenarios
+* Can request and locally download the E-Hentai/ExHentai resized archive (dltype=res, e.g. 1280 mode)
 
 ## Required LRR Server Version
 
